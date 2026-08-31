@@ -1,0 +1,7 @@
+tunnel: 30b9788a-15f1-450c-bbcb-453cda622ebf
+credentials-file: C:\Users\ARYAN\.cloudflared\30b9788a-15f1-450c-bbcb-453cda622ebf.json
+
+ingress:
+  - hostname: reel-downloader-api.aryanshinde.in
+    service: http://localhost:8000
+  - service: http_status:404
