@@ -1,7 +1,7 @@
 import os
 import urllib.request
 import yt_dlp
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -38,17 +38,18 @@ def get_ydl_options():
         'format': 'best',
         'outtmpl': os.path.join(DOWNLOADS_DIR, '%(id)s_%(playlist_index|1)s.%(ext)s'),
         'ignoreerrors': True,
+        'no_warnings': True,
         'quiet': True,
-        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+        }
     }
     
-    if os.path.exists(COOKIE_FILE):
-        opts['cookiefile'] = COOKIE_FILE
-    else:
-        try:
-            opts['cookiesfrombrowser'] = ('chrome',)
-        except Exception:
-            pass
+    cookie_path = os.environ.get("IG_COOKIE_FILE", COOKIE_FILE)
+    if os.path.exists(cookie_path):
+        opts['cookiefile'] = cookie_path
             
     return opts
 
@@ -56,49 +57,78 @@ def download_media(url: str, base_url: str) -> list[str]:
     downloaded_urls = []
     ydl_opts = get_ydl_options()
     
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=False, process=False)
-        if not info:
-            raise HTTPException(status_code=400, detail="Unable to extract media from the provided URL.")
-        
-        entries = info.get('entries') if info.get('_type') == 'playlist' else [info]
-        
-        for idx, entry in enumerate(entries, start=1):
-            if not entry:
-                continue
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False, process=False)
+            if not info:
+                raise HTTPException(status_code=400, detail="Unable to extract media from the provided URL.")
             
-            has_video = False
-            if entry.get('formats'):
-                has_video = any(f.get('vcodec') != 'none' for f in entry['formats'])
+            entries = info.get('entries') if info.get('_type') == 'playlist' else [info]
             
-            entry_id = entry.get('id', f'item_{idx}')
-            
-            if has_video:
-                ydl.process_ie_result(entry, download=True)
-                ext = entry.get('ext', 'mp4')
-                filename = f"{entry_id}_{idx}.{ext}"
-                full_path = os.path.join(DOWNLOADS_DIR, filename)
-                if not os.path.exists(full_path):
-                    alt_filename = f"{entry_id}_1.{ext}"
-                    alt_path = os.path.join(DOWNLOADS_DIR, alt_filename)
-                    if os.path.exists(alt_path):
-                        filename = alt_filename
-                downloaded_urls.append(f"{base_url}/files/{filename}")
-            elif entry.get('thumbnails'):
-                thumbnails = entry['thumbnails']
-                best_thumbnail = thumbnails[-1]['url']
-                filename = f"{entry_id}_{idx}.jpg"
-                full_path = os.path.join(DOWNLOADS_DIR, filename)
+            for idx, entry in enumerate(entries, start=1):
+                if not entry:
+                    continue
                 
-                req = urllib.request.Request(
-                    best_thumbnail,
-                    headers={'User-Agent': 'Mozilla/5.0'}
-                )
-                with urllib.request.urlopen(req) as response, open(full_path, 'wb') as out_file:
-                    out_file.write(response.read())
-                downloaded_urls.append(f"{base_url}/files/{filename}")
+                has_video = False
+                if entry.get('formats'):
+                    has_video = any(f.get('vcodec') != 'none' for f in entry['formats'])
+                
+                entry_id = entry.get('id', f'item_{idx}')
+                
+                if has_video:
+                    ydl.process_ie_result(entry, download=True)
+                    ext = entry.get('ext', 'mp4')
+                    filename = f"{entry_id}_{idx}.{ext}"
+                    full_path = os.path.join(DOWNLOADS_DIR, filename)
+                    if not os.path.exists(full_path):
+                        alt_filename = f"{entry_id}_1.{ext}"
+                        alt_path = os.path.join(DOWNLOADS_DIR, alt_filename)
+                        if os.path.exists(alt_path):
+                            filename = alt_filename
+                        else:
+                            matched = [f for f in os.listdir(DOWNLOADS_DIR) if f.startswith(entry_id)]
+                            if matched:
+                                filename = matched[0]
+                    downloaded_urls.append(f"{base_url}/files/{filename}")
+                elif entry.get('thumbnails'):
+                    thumbnails = entry['thumbnails']
+                    best_thumbnail = thumbnails[-1]['url']
+                    filename = f"{entry_id}_{idx}.jpg"
+                    full_path = os.path.join(DOWNLOADS_DIR, filename)
+                    
+                    req = urllib.request.Request(
+                        best_thumbnail,
+                        headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+                    )
+                    with urllib.request.urlopen(req) as response, open(full_path, 'wb') as out_file:
+                        out_file.write(response.read())
+                    downloaded_urls.append(f"{base_url}/files/{filename}")
+    except yt_dlp.utils.DownloadError as e:
+        raise HTTPException(status_code=400, detail=f"Download error: {str(e)}")
+    except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
+        raise HTTPException(status_code=500, detail=f"Internal extraction error: {str(e)}")
 
     return downloaded_urls
+
+@app.get("/")
+def root():
+    return {
+        "status": "online",
+        "service": "Instagram Downloader API",
+        "docs": "/docs",
+        "health": "/health",
+        "endpoints": {
+            "download": "POST /download",
+            "delete": "POST /delete",
+            "files": "GET /files/{filename}"
+        }
+    }
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    return Response(status_code=204)
 
 @app.get("/health")
 def health_check():

@@ -7,13 +7,23 @@ TEST_URLS = [
     "https://www.instagram.com/p/DcgOltHCKgf/?img_index=2"
 ]
 
+COOKIE_FILE = os.path.abspath("cookies.txt")
+
 ydl_opts = {
     'format': 'best',
     'outtmpl': 'downloads/%(id)s_%(playlist_index|1)s.%(ext)s',
-    'cookiesfrombrowser': ('chrome',),
     'ignoreerrors': True,
-    'quiet': True,
+    'quiet': False,
+    'http_headers': {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+    }
 }
+
+cookie_path = os.environ.get("IG_COOKIE_FILE", COOKIE_FILE)
+if os.path.exists(cookie_path):
+    ydl_opts['cookiefile'] = cookie_path
 
 def download_instagram_media(urls, opts):
     os.makedirs("downloads", exist_ok=True)

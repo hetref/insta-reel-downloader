@@ -47,7 +47,7 @@ This guide walks new users step-by-step through setting up, running the FastAPI 
 
 1. **Python 3.10+**: Installed on your laptop.
 2. **`cloudflared` CLI**: Installed on your system (`winget install Cloudflare.cloudflared` on Windows or `brew install cloudflared` on macOS).
-3. **Instagram Cookie Session**: Logged into Instagram on Chrome (or a `cookies.txt` file in the project folder).
+3. **Instagram Cookies (Optional)**: Public Reels/Posts download automatically without any cookies. If downloading private content or hitting rate limits, place an exported `cookies.txt` file in the project folder.
 
 ---
 
@@ -156,6 +156,9 @@ curl -X POST "https://reel-downloader-api.aryanshinde.in/delete" \
 ---
 
 ## Troubleshooting & FAQ
-
-### Q: What if I get an Instagram login / 401 error?
-**A**: Ensure Chrome is logged in to Instagram on your computer, or place an updated `cookies.txt` file into the `reel-downloader/` project root directory.
+ 
+### Q: What if I get an Instagram login or rate limit error?
+**A**: Public Instagram Reels/Posts do not require cookies and download directly. If you need to download private posts or encounter rate limits:
+1. Install a browser extension like **"Get cookies.txt LOCALLY"** in your browser.
+2. Go to `instagram.com` while logged in, export the cookies, and save the file as `cookies.txt` in the root `reel-downloader/` directory.
+3. The API will automatically detect and use `cookies.txt`.
