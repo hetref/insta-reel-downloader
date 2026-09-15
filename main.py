@@ -3,8 +3,24 @@ import urllib.request
 import yt_dlp
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+
+# Automatically load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    # Built-in fallback parser if python-dotenv is not yet installed
+    env_path = os.path.join(os.path.dirname(__file__), ".env")
+    if os.path.exists(env_path):
+        with open(env_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    key, val = line.split("=", 1)
+                    os.environ.setdefault(key.strip(), val.strip().strip('"').strip("'"))
 
 app = FastAPI(
     title="Instagram Downloader API",
@@ -18,6 +34,27 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.middleware("http")
+async def verify_api_secret(request: Request, call_next):
+    # Retrieve secret from environment variable (.env or systemd)
+    api_secret = os.environ.get("API_SECRET_KEY", "").strip()
+    
+    # If API_SECRET_KEY is configured, protect endpoints
+    if api_secret:
+        public_paths = ["/health", "/docs", "/openapi.json", "/favicon.ico"]
+        # Allow health checks, API docs, and direct static file streaming
+        if request.url.path not in public_paths and not request.url.path.startswith("/files/"):
+            provided_secret = request.headers.get("x-api-key") or request.headers.get("x-api-secret")
+            if not provided_secret or provided_secret != api_secret:
+                return JSONResponse(
+                    status_code=401,
+                    content={
+                        "status": "error",
+                        "message": "Unauthorized: Invalid or missing API secret key in 'X-API-Key' or 'X-API-Secret' header."
+                    }
+                )
+    return await call_next(request)
 
 DOWNLOADS_DIR = os.path.abspath("downloads")
 os.makedirs(DOWNLOADS_DIR, exist_ok=True)

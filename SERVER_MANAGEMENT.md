@@ -10,7 +10,8 @@ This document contains all commands and workflows for managing the **Instagram D
 3. [Updating Code & Restarting](#3-updating-code--restarting-workflow)
 4. [Caddy Reverse Proxy Management](#4-caddy-reverse-proxy-management)
 5. [Health Checks & Troubleshooting](#5-health-checks--troubleshooting)
-6. [Quick Reference Cheat Sheet](#6-quick-reference-cheat-sheet)
+6. [API Secret Key Authentication (.env)](#6-api-secret-key-authentication-env)
+7. [Quick Reference Cheat Sheet](#7-quick-reference-cheat-sheet)
 
 ---
 
@@ -181,7 +182,40 @@ sudo iptables -I INPUT 1 -s 172.16.0.0/12 -p tcp --dport 8000 -j ACCEPT
 
 ---
 
-## 6. Quick Reference Cheat Sheet
+## 6. API Secret Key Authentication (.env)
+
+The API supports securing all endpoints with a secret key stored in your `.env` file or environment.
+
+### Setting the Secret Key
+On your Linux server in `/root/projects/insta-reel-downloader`:
+```bash
+nano .env
+```
+Add your secret:
+```env
+API_SECRET_KEY=my_ultra_secure_secret_key_12345
+```
+Then restart the service:
+```bash
+sudo systemctl restart reel-downloader
+```
+
+### Making Authorized Requests
+Include `X-API-Key` or `X-API-Secret` in the headers:
+```bash
+curl -X POST "https://reel-download-api-cloud.aryanshinde.in/download" \
+     -H "Content-Type: application/json" \
+     -H "X-API-Key: my_ultra_secure_secret_key_12345" \
+     -d '{"url": "https://www.instagram.com/reels/DcjIV1-K8e8/"}'
+```
+
+- If the key is missing or wrong: Returns `401 Unauthorized`.
+- If `API_SECRET_KEY` is not set in `.env`: The API remains open for public testing.
+- Public routes like `/health` and `/files/` (download streaming) do not require the header.
+
+---
+
+## 7. Quick Reference Cheat Sheet
 
 | Action | Command |
 |---|---|
