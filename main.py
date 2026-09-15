@@ -30,29 +30,28 @@ os.makedirs(DOWNLOADS_DIR, exist_ok=True)
 FILE_RETENTION_SECONDS = int(os.environ.get("FILE_RETENTION_MINUTES", 30)) * 60
 
 async def continuous_cleanup_worker():
-    """Continuously runs in the background. Deletes any file older than 30 minutes."""
+    """Continuously runs in the background. Ultra-lightweight memory footprint using os.scandir iterator."""
     while True:
         try:
             now = time.time()
             cutoff = now - FILE_RETENTION_SECONDS
             if os.path.exists(DOWNLOADS_DIR):
-                for filename in os.listdir(DOWNLOADS_DIR):
-                    filepath = os.path.join(DOWNLOADS_DIR, filename)
-                    if os.path.isfile(filepath) and not filename.startswith("."):
-                        try:
-                            file_mtime = os.path.getmtime(filepath)
-                            if file_mtime < cutoff:
-                                file_size = os.path.getsize(filepath)
-                                age_min = round((now - file_mtime) / 60, 1)
-                                os.remove(filepath)
-                                size_kb = round(file_size / 1024, 1)
-                                print(f"🗑️  [AUTO-CLEANUP] Deleted expired file: {filename} (Age: {age_min}m, Size: {size_kb}KB)", flush=True)
-                        except Exception as e:
-                            print(f"⚠️  [AUTO-CLEANUP ERROR] Failed to delete {filename}: {e}", flush=True)
+                with os.scandir(DOWNLOADS_DIR) as it:
+                    for entry in it:
+                        if not entry.name.startswith(".") and entry.is_file():
+                            try:
+                                stat = entry.stat()
+                                if stat.st_mtime < cutoff:
+                                    os.remove(entry.path)
+                                    age_min = round((now - stat.st_mtime) / 60, 1)
+                                    size_kb = round(stat.st_size / 1024, 1)
+                                    print(f"🗑️  [AUTO-CLEANUP] Deleted expired file: {entry.name} (Age: {age_min}m, Size: {size_kb}KB)", flush=True)
+                            except Exception as e:
+                                print(f"⚠️  [AUTO-CLEANUP ERROR] Failed to delete {entry.name}: {e}", flush=True)
         except Exception as e:
             print(f"⚠️  [AUTO-CLEANUP ERROR] Worker error: {e}", flush=True)
         
-        # Check every 60 seconds
+        # Sits idle with 0% CPU for 60 seconds
         await asyncio.sleep(60)
 
 @asynccontextmanager
