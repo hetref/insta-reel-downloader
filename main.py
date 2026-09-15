@@ -136,14 +136,19 @@ def health_check():
 
 @app.post("/download")
 def download_endpoint(payload: DownloadRequest, request: Request):
+    print(f"📥 [REQUEST] Received download query for: {payload.url}", flush=True)
     try:
-        # Dynamically construct base URL (e.g. https://reel-downloader-api.aryanshinde.in)
-        base_url = str(request.base_url).rstrip('/')
+        # Construct base URL from environment variable if set, otherwise from request headers
+        custom_base = os.environ.get("API_BASE_URL", "").rstrip('/')
+        base_url = custom_base if custom_base else str(request.base_url).rstrip('/')
         urls = download_media(payload.url, base_url)
         if not urls:
+            print(f"⚠️  [NOT FOUND] No downloadable media for: {payload.url}", flush=True)
             raise HTTPException(status_code=404, detail="No downloadable media found.")
+        print(f"✅ [SUCCESS] Extracted {len(urls)} file(s): {urls}", flush=True)
         return {"status": "success", "download_urls": urls}
     except Exception as e:
+        print(f"❌ [ERROR] Processing failed for {payload.url}: {e}", flush=True)
         if isinstance(e, HTTPException):
             raise e
         raise HTTPException(status_code=500, detail=str(e))
@@ -151,6 +156,7 @@ def download_endpoint(payload: DownloadRequest, request: Request):
 @app.post("/delete")
 def delete_endpoint(payload: DeleteRequest):
     input_str = payload.file_url.strip()
+    print(f"🗑️  [DELETE] Request to delete: {input_str}", flush=True)
     
     # Extract filename from URL (e.g. https://.../files/DcjIV1-K8e8_1.mp4 -> DcjIV1-K8e8_1.mp4)
     if "/files/" in input_str:
@@ -167,10 +173,14 @@ def delete_endpoint(payload: DeleteRequest):
     
     try:
         os.remove(target_path)
+        print(f"✅ [DELETED] File '{filename}' removed.", flush=True)
         return {"status": "success", "message": f"File '{filename}' deleted successfully."}
     except Exception as e:
+        print(f"❌ [DELETE ERROR] Failed to delete file: {e}", flush=True)
         raise HTTPException(status_code=500, detail=f"Failed to delete file: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    host = os.environ.get("HOST", "0.0.0.0")
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(app, host=host, port=port, proxy_headers=True, forwarded_allow_ips="*")
