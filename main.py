@@ -1,5 +1,8 @@
+import asyncio
 import os
+import time
 import urllib.request
+from contextlib import asynccontextmanager
 import yt_dlp
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -22,9 +25,48 @@ except ImportError:
                     key, val = line.split("=", 1)
                     os.environ.setdefault(key.strip(), val.strip().strip('"').strip("'"))
 
+DOWNLOADS_DIR = os.path.abspath("downloads")
+os.makedirs(DOWNLOADS_DIR, exist_ok=True)
+FILE_RETENTION_SECONDS = int(os.environ.get("FILE_RETENTION_MINUTES", 30)) * 60
+
+async def continuous_cleanup_worker():
+    """Continuously runs in the background. Deletes any file older than 30 minutes."""
+    while True:
+        try:
+            now = time.time()
+            cutoff = now - FILE_RETENTION_SECONDS
+            if os.path.exists(DOWNLOADS_DIR):
+                for filename in os.listdir(DOWNLOADS_DIR):
+                    filepath = os.path.join(DOWNLOADS_DIR, filename)
+                    if os.path.isfile(filepath) and not filename.startswith("."):
+                        try:
+                            file_mtime = os.path.getmtime(filepath)
+                            if file_mtime < cutoff:
+                                file_size = os.path.getsize(filepath)
+                                age_min = round((now - file_mtime) / 60, 1)
+                                os.remove(filepath)
+                                size_kb = round(file_size / 1024, 1)
+                                print(f"🗑️  [AUTO-CLEANUP] Deleted expired file: {filename} (Age: {age_min}m, Size: {size_kb}KB)", flush=True)
+                        except Exception as e:
+                            print(f"⚠️  [AUTO-CLEANUP ERROR] Failed to delete {filename}: {e}", flush=True)
+        except Exception as e:
+            print(f"⚠️  [AUTO-CLEANUP ERROR] Worker error: {e}", flush=True)
+        
+        # Check every 60 seconds
+        await asyncio.sleep(60)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Start continuous background cleanup worker when server starts
+    cleanup_task = asyncio.create_task(continuous_cleanup_worker())
+    print(f"🕒 [STARTUP] Auto-cleanup background worker running (deletes files after {FILE_RETENTION_SECONDS // 60} minutes)", flush=True)
+    yield
+    cleanup_task.cancel()
+
 app = FastAPI(
     title="Instagram Downloader API",
-    description="API to download Instagram Reels, Posts, and Carousels and manage files locally."
+    description="API to download Instagram Reels, Posts, and Carousels and manage files locally.",
+    lifespan=lifespan
 )
 
 app.add_middleware(
@@ -40,24 +82,24 @@ async def verify_api_secret(request: Request, call_next):
     # Retrieve secret from environment variable (.env or systemd)
     api_secret = os.environ.get("API_SECRET_KEY", "").strip()
     
-    # If API_SECRET_KEY is configured, protect endpoints
-    if api_secret:
-        public_paths = ["/health", "/docs", "/openapi.json", "/favicon.ico"]
-        # Allow health checks, API docs, and direct static file streaming
-        if request.url.path not in public_paths and not request.url.path.startswith("/files/"):
-            provided_secret = request.headers.get("x-api-key") or request.headers.get("x-api-secret")
-            if not provided_secret or provided_secret != api_secret:
-                return JSONResponse(
-                    status_code=401,
-                    content={
-                        "status": "error",
-                        "message": "Unauthorized: Invalid or missing API secret key in 'X-API-Key' or 'X-API-Secret' header."
-                    }
-                )
+    # If API_SECRET_KEY is configured, protect ALL endpoints (health, download, delete, files)
+    if api_secret and request.url.path != "/favicon.ico":
+        # Check header (X-API-Key or X-API-Secret) or query param (?api_key= or ?key=)
+        provided_secret = (
+            request.headers.get("x-api-key")
+            or request.headers.get("x-api-secret")
+            or request.query_params.get("api_key")
+            or request.query_params.get("key")
+        )
+        if not provided_secret or provided_secret != api_secret:
+            return JSONResponse(
+                status_code=401,
+                content={
+                    "status": "error",
+                    "message": "Unauthorized: Invalid or missing API secret key in 'X-API-Key' / 'X-API-Secret' header."
+                }
+            )
     return await call_next(request)
-
-DOWNLOADS_DIR = os.path.abspath("downloads")
-os.makedirs(DOWNLOADS_DIR, exist_ok=True)
 
 # Mount /files static route to serve downloaded media directly
 app.mount("/files", StaticFiles(directory=DOWNLOADS_DIR), name="files")

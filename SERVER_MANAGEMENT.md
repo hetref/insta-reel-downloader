@@ -11,7 +11,8 @@ This document contains all commands and workflows for managing the **Instagram D
 4. [Caddy Reverse Proxy Management](#4-caddy-reverse-proxy-management)
 5. [Health Checks & Troubleshooting](#5-health-checks--troubleshooting)
 6. [API Secret Key Authentication (.env)](#6-api-secret-key-authentication-env)
-7. [Quick Reference Cheat Sheet](#7-quick-reference-cheat-sheet)
+7. [Automated 30-Minute Cleanup Cron Job](#7-automated-30-minute-cleanup-cron-job)
+8. [Quick Reference Cheat Sheet](#8-quick-reference-cheat-sheet)
 
 ---
 
@@ -201,7 +202,15 @@ sudo systemctl restart reel-downloader
 ```
 
 ### Making Authorized Requests
-Include `X-API-Key` or `X-API-Secret` in the headers:
+Include `X-API-Key` or `X-API-Secret` in the headers of **every** request:
+
+#### 1. Health Check
+```bash
+curl -i https://reel-download-api-cloud.aryanshinde.in/health \
+     -H "X-API-Key: my_ultra_secure_secret_key_12345"
+```
+
+#### 2. Download Media
 ```bash
 curl -X POST "https://reel-download-api-cloud.aryanshinde.in/download" \
      -H "Content-Type: application/json" \
@@ -209,19 +218,48 @@ curl -X POST "https://reel-download-api-cloud.aryanshinde.in/download" \
      -d '{"url": "https://www.instagram.com/reels/DcjIV1-K8e8/"}'
 ```
 
+#### 3. Access Downloaded File (`/files/`)
+Via header:
+```bash
+curl -O "https://reel-download-api-cloud.aryanshinde.in/files/DcjIV1-K8e8_1.mp4" \
+     -H "X-API-Key: my_ultra_secure_secret_key_12345"
+```
+Or via query parameter (convenient for browser downloads):
+```text
+https://reel-download-api-cloud.aryanshinde.in/files/DcjIV1-K8e8_1.mp4?key=my_ultra_secure_secret_key_12345
+```
+
 - If the key is missing or wrong: Returns `401 Unauthorized`.
-- If `API_SECRET_KEY` is not set in `.env`: The API remains open for public testing.
-- Public routes like `/health` and `/files/` (download streaming) do not require the header.
+- If `API_SECRET_KEY` is not set in `.env`: The API remains open without authentication.
 
 ---
 
-## 7. Quick Reference Cheat Sheet
+## 7. Automatic Continuous 30-Minute File Cleanup
+
+### How it Works (100% Automatic — No Cron or Manual Steps Needed)
+The FastAPI server has a **built-in background cleanup worker** running continuously 24/7.
+- Every **60 seconds**, the background worker scans `downloads/`.
+- If any file's age exceeds **30 minutes**, it is **deleted automatically**.
+- As long as `reel-downloader.service` is running, cleanup happens continuously without you needing to run any command or set up cron!
+
+You will see automatic cleanup logs in real-time when streaming server logs:
+```bash
+journalctl -u reel-downloader -f
+```
+*Live log example:*
+```text
+🗑️  [AUTO-CLEANUP] Deleted expired file: DcjIV1-K8e8_1.mp4 (Age: 30.2m, Size: 4120.5KB)
+```
+
+---
+
+## 8. Quick Reference Cheat Sheet
 
 | Action | Command |
 |---|---|
 | **Restart API** | `sudo systemctl restart reel-downloader` |
 | **Check API Status** | `sudo systemctl status reel-downloader` |
-| **Watch API Logs** | `journalctl -u reel-downloader -f` |
+| **Watch API Logs (Includes Auto-Cleanup)** | `journalctl -u reel-downloader -f` |
 | **Reload Caddy** | `docker exec -w /etc/caddy n8n-docker-caddy-caddy-1 caddy reload` |
 | **Watch Caddy Logs** | `docker logs -f n8n-docker-caddy-caddy-1` |
 | **Restart Caddy** | `docker restart n8n-docker-caddy-caddy-1` |
